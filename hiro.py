@@ -250,7 +250,7 @@ if __name__ == "__main__":
 
 
                     print("Total T : ", total_timesteps, "  Episode Num : ", episode_num, "  Episode T : ",
-                          episode_timesteps, "  Reward : ", episode_reward)
+                          episode_timesteps, "  Reward : ", episode_reward, "  Low reward : ", low_reward_sum)
                     policy.train(replay_buffer_low, episode_timesteps, args.batch_size, args.discount, args.tau,
                                   args.policy_noise, args.noise_clip, args.policy_freq)
                 break
