@@ -3,38 +3,41 @@ import torch
 import gym
 import argparse
 import os
-
 import utils
 import TD3
+import time
 
 
 
 # Runs policy for X episodes and returns average reward
-def evaluate_policy(policy_high, policy, eval_episodes=10):
+def evaluate_policy(policy_high, policy, eval_episodes=5):
     avg_reward = 0.
 
     for _ in range(eval_episodes) :
 
         obs = env.reset()
+        high_input = np.concatenate((obs['observation'], obs['desired_goal']), axis=0)
         done = False
 
         while not done :
-            absolute_goal = policy_high.select_action(np.array(obs))
-            goal = absolute_goal - obs
+            goal = policy_high.select_action(np.array(high_input))
 
             while not done :
-                if args.render :
-                    env.render()
 
-                low_input = np.concatenate((obs, goal), axis=0)
+
+                low_input = np.concatenate((obs['observation'], goal), axis=0)
                 action = policy.select_action(low_input)
+                #print('action : ', action)
                 new_obs, reward, done, _ = env.step(action)
 
                 avg_reward += reward
 
-                if -np.sum(abs(obs + goal - new_obs)) > args.reward_threshold :
+                if -np.sum(abs(obs['observation'] + goal - new_obs['observation'])) > args.reward_threshold :
                     obs = new_obs
                     break
+
+                if args.render :
+                    env.render()
 
                 obs = new_obs
 
@@ -48,15 +51,15 @@ def evaluate_policy(policy_high, policy, eval_episodes=10):
 def re_labeling(policy, replay_buffer_low, replay_buffer_high, relabel_replay_buffer, batch_size, state_dim) :
 
     # Sample replay buffer
-    random_seed = np.random.randint(0, len(replay_buffer_high.storage), size=len(replay_buffer_high.storage))
+    random_seed = np.random.randint(0, len(replay_buffer_high.storage), size=batch_size)
     X = replay_buffer_low.sample_episode(len(replay_buffer_low.storage), random_seed)
-    _, _, _, r, d = replay_buffer_high.sample(len(replay_buffer_high.storage), random_seed)
-    out = []
-
-
+    X_high, Y_high, _, r, d = replay_buffer_high.sample(len(replay_buffer_high.storage), random_seed)
 
     # first episode
     g = []
+
+    # reset relabel replay buffer
+    relabel_replay_buffer.reset()
 
     # select specific episode
     for i in range(len(X)) :
@@ -78,39 +81,40 @@ def re_labeling(policy, replay_buffer_low, replay_buffer_high, relabel_replay_bu
             tmp_done.append((1 - X[i][3][j]))
             tmp_reward.append(X[i][4][j])
 
-            state = np.asarray(tmp_state)
-            action = np.asarray(tmp_action)
-            next_state = np.asarray(tmp_next_state)
-            done = np.asarray(tmp_done)
-            reward = np.asarray(tmp_reward)
+        state = np.asarray(tmp_state)
+        action = np.asarray(tmp_action)
+        next_state = np.asarray(tmp_next_state)
+        done = np.asarray(tmp_done)
+        reward = np.asarray(tmp_reward)
 
-            # make virtual goals
-            candidate = []
-            candidate_score = []
-            candidate.append(state[0, :state_dim]) # original goal
-            candidate.append(np.asarray(state[-1, state_dim:]) - np.asarray(state[0, state_dim:]))    # s_(t+c) - s_t
-            for _ in range(8) :
-                candidate.append(np.random.normal(candidate[0], 1.0))
-            candidate = np.asarray(candidate)
+        # make virtual goals
+        candidate = []
+        candidate_score = []
+        candidate.append(state[0, state_dim:]) # original goal
+        candidate.append(np.asarray(state[-1, :state_dim]) - np.asarray(state[0, :state_dim]))    # s_(t+c) - s_t
+        for _ in range(8) :
+            candidate.append(np.random.normal(candidate[1], 1.0))
+        candidate = np.asarray(candidate)
 
         # estimate each goal_bar candidate
         for k in range(10) :
-
+            virtual_goal = candidate[k]
             score = 0
             # episode iteration
-            for l in range(state.shape[0]) :
-                score -= abs(action[l] - policy.select_action(np.concatenate((state[l, state_dim:], candidate[k]), axis=0)))/2
+            for l in range(0, state.shape[0], 2) :
+                score -= np.sum(abs(action[l] - policy.select_action(np.concatenate((state[l, :state_dim], virtual_goal), axis=0)))/2)
+
+                # virtual goal update
+                if l >= (state.shape[0]-1) :
+                    continue
+                else :
+                    virtual_goal = state[l, state_dim] + virtual_goal - state[l+1, :state_dim]
             candidate_score.append(score)
 
         max_num = np.argmax(candidate_score)
         g.append(candidate[max_num])
 
-    relabel_replay_buffer.reset()
-    for i in range(len(X)) :
-        t1 = np.concatenate((X[i][0][0][state_dim:], g[i]), axis=0)
-        t2 = np.concatenate((X[i][1][-1][state_dim:], g[i]), axis=0)
-
-        relabel_replay_buffer.add((X[i][0][0][state_dim:], X[i][1][-1][state_dim:], g[i] + X[i][0][0][state_dim], r[i], d[i]))
+        relabel_replay_buffer.add((X_high[i], Y_high[i], g[i], r[i], d[i]))
 
 
 
@@ -118,28 +122,28 @@ if __name__ == "__main__":
 
     parser = argparse.ArgumentParser()
     parser.add_argument("--policy_name", default="TD3")  # Policy name
-    parser.add_argument("--env_name", default="Pendulum-v0")  # OpenAI gym environment name
+    parser.add_argument("--env_name", default="FetchReach-v1")  # OpenAI gym environment name
     parser.add_argument("--seed", default=1, type=int)  # Sets Gym, PyTorch and Numpy seeds
-    parser.add_argument("--start_episode", default=30,
+    parser.add_argument("--start_episode", default=200,
                         type=int)  # How many time steps purely random policy is run for
-    parser.add_argument("--high_start_episode", default=50,
+    parser.add_argument("--high_start_episode", default=700,
                         type=int)  # How many time steps purely random policy is run for
 
     parser.add_argument("--eval_freq", default=10, type=int)  # How often (episode) we evaluate
     parser.add_argument("--max_timesteps", default=1e6, type=float)  # Max time steps to run environment for
     parser.add_argument("--save_models", action="store_true")  # Whether or not models are saved
     parser.add_argument("--expl_noise", default=1, type=float)  # Std of Gaussian exploration noise
-    parser.add_argument("--batch_size", default=30, type=int)  # Batch size for both actor and critic
+    parser.add_argument("--batch_size", default=40, type=int)  # Batch size for both actor and critic
     parser.add_argument("--discount", default=0.99, type=float)  # Discount factor
     parser.add_argument("--tau", default=0.005, type=float)  # Target network update rate
     parser.add_argument("--policy_noise", default=0.2, type=float)  # Noise added to target policy during critic update
     parser.add_argument("--noise_clip", default=0.5, type=float)  # Range to clip target policy noise
     parser.add_argument("--policy_freq", default=2, type=int)  # Frequency of delayed policy updates
-    parser.add_argument("--reward_threshold", default=-0.03, type=float) # low_policy reward threshold
-    parser.add_argument("--render", default=False, type=bool)  # low_policy reward threshold
+    parser.add_argument("--reward_threshold", default=-5, type=float) # low_policy reward threshold
+    parser.add_argument("--render", default=True, type=bool)  # low_policy reward threshold
 
     # HIRO parameters
-    parser.add_argument("--high_train_episode", default=30, type=int)
+    parser.add_argument("--high_train_episode", default=400, type=int)
 
 
     args = parser.parse_args()
@@ -165,14 +169,15 @@ if __name__ == "__main__":
     torch.manual_seed(args.seed)
     np.random.seed(args.seed)
 
-    state_dim = env.observation_space.shape[0]
+    state_dim = env.observation_space.spaces['observation'].shape[0]
     action_dim = env.action_space.shape[0]
+    env_goal_dim = env.observation_space.spaces['desired_goal'].shape[0]
     goal_dim = state_dim
-    max_action = env.action_space.high
-    max_state = env.observation_space.high
+    max_action = env.action_space.high[0]
+    max_state = 200.
 
     # Initialize policy
-    policy_high = TD3.TD3(state_dim, goal_dim, max_state)
+    policy_high = TD3.TD3(state_dim+env_goal_dim, goal_dim, max_state)
     policy = TD3.TD3(state_dim*2, action_dim, max_action)
 
 
@@ -195,20 +200,6 @@ if __name__ == "__main__":
 
         if done:
 
-            if total_timesteps != 0 :
-                if len(replay_buffer_high.storage) > args.high_train_episode :
-                    print('high_policy training..')
-
-                    re_labeling(policy, replay_buffer_low, replay_buffer_high, relabel_replay_buffer, args.batch_size, state_dim)
-
-                    policy_high.train(relabel_replay_buffer, int(episode_timesteps/10), args.batch_size, args.discount, args.tau,
-                             args.policy_noise, args.noise_clip, args.policy_freq)
-
-
-                else :
-                    print('high policy replay buffer size : ', len(replay_buffer_high.storage))
-
-
                 # Evaluate episode
             if episode_since_eval >= args.eval_freq:
                 episode_since_eval %= args.eval_freq
@@ -228,23 +219,28 @@ if __name__ == "__main__":
         low_reward_sum = 0
         high_reward = 0
         low_goal_reach = False
-        high_obs = obs
+        high_input = np.concatenate((obs['observation'], obs['desired_goal']), axis=0)
 
         # Select action randomly or according to policy
         if episode_num < args.high_start_episode:
-            absolute_goal = env.observation_space.sample()
+            goal = np.random.uniform(-200., 200., int(env.observation_space.spaces['observation'].shape[0]))
         else:
-            absolute_goal = policy_high.select_action(np.array(obs))
+            goal = policy_high.select_action(high_input)
             if args.expl_noise != 0:
-                absolute_goal = (absolute_goal + np.random.normal(0, args.expl_noise,
-                                                                  size=env.observation_space.shape[0])).clip(
-                    env.observation_space.low, env.observation_space.high)
-        goal = absolute_goal - obs
+                goal = (goal + np.random.normal(0, args.expl_noise,
+                                                                  size=env.observation_space.spaces['observation'].shape[0])).clip(
+                    -max_state, max_state)
 
         # Low_Policy start
         while total_timesteps < args.max_timesteps:
 
             if done:
+
+                # Store data in replay buffer
+                replay_buffer_high.add((high_input, np.concatenate((new_obs['observation'], new_obs['desired_goal']), axis=0), goal, high_reward, done_bool))
+
+                # add episode to low replay buffer
+                replay_buffer_low.add(episode_replay_buffer.extract())
 
                 if total_timesteps != 0:
 
@@ -253,11 +249,23 @@ if __name__ == "__main__":
                           episode_timesteps, "  Reward : ", episode_reward, "  Low reward : ", low_reward_sum)
                     policy.train(replay_buffer_low, episode_timesteps, args.batch_size, args.discount, args.tau,
                                   args.policy_noise, args.noise_clip, args.policy_freq)
+
+                    if episode_num > args.high_train_episode :
+                        print('high_policy_training..')
+                        #start_time = time.time()
+                        re_labeling(policy, replay_buffer_low, replay_buffer_high, relabel_replay_buffer,
+                                    args.batch_size, state_dim)
+                        #print(time.time() - start_time)
+
+                        policy_high.train(relabel_replay_buffer, int(episode_timesteps / 10), args.batch_size,
+                                          args.discount, args.tau,
+                                          args.policy_noise, args.noise_clip, args.policy_freq)
+
                 break
 
             # Select action randomly or according to policy
 
-            low_input = np.concatenate((obs, goal), axis=0)
+            low_input = np.concatenate((obs['observation'], goal), axis=0)
 
             if episode_num < args.start_episode:
                 action = env.action_space.sample()
@@ -276,12 +284,12 @@ if __name__ == "__main__":
             episode_reward += reward
             high_reward += reward
 
-            low_reward = -abs(np.sum(obs + goal - new_obs))
-            goal = obs + goal - new_obs
+            low_reward = -abs(np.sum(obs['observation'] + goal - new_obs['observation']))
+            goal = obs['observation'] + goal - new_obs['observation']
             low_reward_sum += low_reward
 
 
-            episode_replay_buffer.add((low_input, np.concatenate((new_obs, goal), axis=0), action, low_reward, done_bool))
+            episode_replay_buffer.add((low_input, np.concatenate((new_obs['observation'], goal), axis=0), action, low_reward, done_bool))
 
             obs = new_obs
 
@@ -293,11 +301,7 @@ if __name__ == "__main__":
                 low_goal_reach = True
                 break
 
-        # Store data in replay buffer
-        replay_buffer_high.add((high_obs, new_obs, absolute_goal, high_reward, done_bool))
 
-        # add episode to low replay buffer
-        replay_buffer_low.add(episode_replay_buffer.extract())
 
 
     # Final evaluation

@@ -79,38 +79,33 @@ class Episode_ReplayBuffer(object) :
 
 	def sample(self, batch_size):
 
-		if len(self.storage) < batch_size :
-			ind = np.random.randint(0, len(self.storage), size=len(self.storage))
-		else :
-			ind = np.random.randint(0, len(self.storage), size=batch_size)
 		t = []
-
-
 		x, y, u, r, d = [], [], [], [], []
 
-		for i in range(ind.size):
-			T = self.storage[ind[i]]
-			t.append(T)
+		for i in range(len(self.storage)):
+			T = self.storage[i]
 
-			X, Y, U, R, D = t[i]
+			X, Y, U, R, D = T
 			x.append(np.array(X, copy=False))
 			y.append(np.array(Y, copy=False))
 			u.append(np.array(U, copy=False))
 			r.append(np.array(R, copy=False))
 			d.append(np.array(D, copy=False))
 
-		length = x[0][0].shape[0]
-
-
-		episode_random = np.random.randint(0, len(x), size=batch_size)
+		# length = x[0][0].shape[0]		# size of observation + goal
 
 		s, s2, a, re, do = [], [], [], [], []
-		for k in episode_random :
-			step_random = np.random.randint(0, x[k].shape[0], 1)[0]
-			s.append(x[k][step_random])
-			s2.append(y[k][step_random])
-			a.append(u[k][step_random])
-			re.append(r[k][step_random])
-			do.append(d[k][step_random])
+		for k in range(batch_size) :
+
+			episode_random_num = np.random.randint(0, len(self.storage), 1)[0]
+			test = x[episode_random_num].shape[0]
+			step_random_num = np.random.randint(0, x[episode_random_num].shape[0], 1)
+
+			s.append(x[episode_random_num][step_random_num][0])
+			s2.append(y[episode_random_num][step_random_num][0])
+			a.append(u[episode_random_num][step_random_num][0])
+			re.append(r[episode_random_num][step_random_num][0])
+			do.append(d[episode_random_num][step_random_num][0])
+
 
 		return np.array(s), np.array(s2), np.array(a), np.array(re).reshape(-1, 1), np.array(do).reshape(-1, 1)

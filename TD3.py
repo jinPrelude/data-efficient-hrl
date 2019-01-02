@@ -93,6 +93,7 @@ class TD3(object):
 
 	def train(self, replay_buffer, iterations, batch_size=100, discount=0.99, tau=0.005, policy_noise=0.2, noise_clip=0.5, policy_freq=2):
 
+
 		for it in range(iterations):
 
 			# Sample replay buffer 
@@ -103,10 +104,12 @@ class TD3(object):
 			done = torch.FloatTensor(1 - d).to(device)
 			reward = torch.FloatTensor(r).to(device)
 
-			# Select action according to policy and add clipped noise 
+
+			# Select action according to policy and add clipped noise
 			noise = torch.FloatTensor(u).data.normal_(0, policy_noise).to(device)
 			noise = noise.clamp(-noise_clip, noise_clip)
-
+			next_action = (self.actor_target(next_state) + noise).clamp(self.max_action, self.max_action)
+			"""
 			# customized for high policy observation max range
 			self.max_action = np.asarray(self.max_action)
 			output = self.actor_target(next_state)
@@ -117,11 +120,12 @@ class TD3(object):
 			for i in range(self.max_action.size) :
 
 				# slice output
-				put = output[:, i]
-				put = torch.unsqueeze(put, 1)
+				#put = output[:, i]
+				put = output
+				#put = torch.unsqueeze(put, 1)
 
 				# add noise to the output and clamp
-				put = torch.squeeze((put + noise), 1).clamp(-self.max_action[i], self.max_action[i])
+				put = torch.squeeze((put + noise), 1).clamp(-self.max_action, self.max_action)
 
 				put = put.detach().numpy()
 
@@ -131,11 +135,11 @@ class TD3(object):
 				# store to the temporary memory
 				tmp = put[:, np.newaxis]
 				next_action = np.concatenate((next_action, tmp), axis=1)
-
+			
 			next_action = next_action[:, 1:]
 			next_action = torch.from_numpy(next_action)
 			next_action = next_action.type(torch.float32)
-
+			"""
 
 			# Compute the target Q value
 			target_Q1, target_Q2 = self.critic_target(next_state, next_action)
