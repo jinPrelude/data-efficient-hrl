@@ -101,7 +101,7 @@ def re_labeling(policy, replay_buffer_low, replay_buffer_high, relabel_replay_bu
             virtual_goal = candidate[k]
             score = 0
             # episode iteration
-            for l in range(0, state.shape[0], 2) :
+            for l in range(0, state.shape[0], 1) :
                 score -= np.sum(abs(action[l] - policy.select_action(np.concatenate((state[l, :state_dim], virtual_goal), axis=0)))/2)
 
                 # virtual goal update
@@ -124,10 +124,6 @@ if __name__ == "__main__":
     parser.add_argument("--policy_name", default="TD3")  # Policy name
     parser.add_argument("--env_name", default="FetchReach-v1")  # OpenAI gym environment name
     parser.add_argument("--seed", default=1, type=int)  # Sets Gym, PyTorch and Numpy seeds
-    parser.add_argument("--start_episode", default=200,
-                        type=int)  # How many time steps purely random policy is run for
-    parser.add_argument("--high_start_episode", default=700,
-                        type=int)  # How many time steps purely random policy is run for
 
     parser.add_argument("--eval_freq", default=10, type=int)  # How often (episode) we evaluate
     parser.add_argument("--max_timesteps", default=1e6, type=float)  # Max time steps to run environment for
@@ -142,9 +138,12 @@ if __name__ == "__main__":
     parser.add_argument("--reward_threshold", default=-5, type=float) # low_policy reward threshold
     parser.add_argument("--render", default=True, type=bool)  # low_policy reward threshold
 
-    # HIRO parameters
+    # train start  hyperparameters
     parser.add_argument("--high_train_episode", default=400, type=int)
-
+    parser.add_argument("--start_episode", default=200,
+                        type=int)  # How many time steps purely random policy is run for
+    parser.add_argument("--high_start_episode", default=700,
+                        type=int)  # How many time steps purely random policy is run for
 
     args = parser.parse_args()
 
