@@ -10,9 +10,11 @@ import time
 
 
 # Runs policy for X episodes and returns average reward
+# 성능 테스트를 위한 함수입니다!
 def evaluate_policy(policy_high, policy, eval_episodes=5):
     avg_reward = 0.
-
+    print("---------------------------------------")
+    print("Evaluation over %d episodes: %f" % (eval_episodes, avg_reward))
     for _ in range(eval_episodes) :
 
         obs = env.reset()
@@ -33,6 +35,7 @@ def evaluate_policy(policy_high, policy, eval_episodes=5):
                 avg_reward += reward
 
                 if -np.sum(abs(obs['observation'] + goal - new_obs['observation'])) > args.reward_threshold :
+                    print('goal reached')
                     obs = new_obs
                     break
 
@@ -43,11 +46,11 @@ def evaluate_policy(policy_high, policy, eval_episodes=5):
 
     avg_reward /= eval_episodes
 
-    print("---------------------------------------")
-    print("Evaluation over %d episodes: %f" % (eval_episodes, avg_reward))
+
     print("---------------------------------------")
     return avg_reward
 
+# 리라벨링을 해주고 리라벨링 된 메모리를 relabel_replay_buffer에 저장해줍니다.
 def re_labeling(policy, replay_buffer_low, replay_buffer_high, relabel_replay_buffer, batch_size, state_dim) :
 
     # Sample replay buffer
@@ -67,13 +70,6 @@ def re_labeling(policy, replay_buffer_low, replay_buffer_high, relabel_replay_bu
 
         # gather steps in selected episode
         for j in range(X[i][0].shape[0]) :
-            """
-            state[j] = torch.FloatTensor(X[i, j, 0])
-            action[j] = torch.FloatTensor(X[i, j, 1])
-            next_state[j] = torch.FloatTensor(X[i, j, 2])
-            done[j] = torch.FloatTensor(1 - X[i, j, 3])
-            reward[j] = torch.FloatTensor(X[i, j, 4])
-            """
 
             tmp_state.append(X[i][0][j])
             tmp_next_state.append(X[i][1][j])
@@ -83,9 +79,6 @@ def re_labeling(policy, replay_buffer_low, replay_buffer_high, relabel_replay_bu
 
         state = np.asarray(tmp_state)
         action = np.asarray(tmp_action)
-        next_state = np.asarray(tmp_next_state)
-        done = np.asarray(tmp_done)
-        reward = np.asarray(tmp_reward)
 
         # make virtual goals
         candidate = []
@@ -161,13 +154,16 @@ if __name__ == "__main__":
         os.makedirs("./pytorch_models")
 
     # Init environments
+    # 환경을 생성합니다.
     env = gym.make(args.env_name)
 
     # Set seeds
+    # 시드를 넣어줍니다
     env.seed(args.seed)
     torch.manual_seed(args.seed)
     np.random.seed(args.seed)
 
+    # 환경 정보들을 세팅해줍니다. 이 정보를 policy 한테 줘야 하거든요
     state_dim = env.observation_space.spaces['observation'].shape[0]
     action_dim = env.action_space.shape[0]
     env_goal_dim = env.observation_space.spaces['desired_goal'].shape[0]
@@ -176,14 +172,16 @@ if __name__ == "__main__":
     max_state = 200.
 
     # Initialize policy
+    # policy 를 초기화 생성해줍니다.
     policy_high = TD3.TD3(state_dim+env_goal_dim, goal_dim, max_state)
     policy = TD3.TD3(state_dim*2, action_dim, max_action)
 
+    # replay buffer 들을 만들어줍니다.
+    episode_replay_buffer = utils.ReplayBuffer() # 에피소드씩만을 저장합니다. 에피소드가 끝난 후 replay_buffer_low에 extract 함수로 데이터를 넘겨준 다음 자동으로 초기화됩니다.
+    replay_buffer_low = utils.Episode_ReplayBuffer() # low_polcy를 위한 메모리입니다. 스텝단위가 아닌 에피소드 단위로 저장합니다.
+    replay_buffer_high = utils.ReplayBuffer()   # high_policy를 위한 메모리입니다.
+    relabel_replay_buffer = utils.ReplayBuffer() # re_label 만을 위한 메모리입니다. re_labeling 함수가 시작되면 초기화되고 학습을 위한 re-labeling이 된 메모리를 저장하여 high_policy 학습에 쓰입니다.
 
-    episode_replay_buffer = utils.ReplayBuffer()
-    replay_buffer_low = utils.Episode_ReplayBuffer()
-    replay_buffer_high = utils.ReplayBuffer()
-    relabel_replay_buffer = utils.ReplayBuffer()
 
 
     # Evaluate untrained policy
@@ -199,8 +197,8 @@ if __name__ == "__main__":
 
         if done:
 
-                # Evaluate episode
-            if episode_since_eval >= args.eval_freq:
+            # Evaluate episode
+            if episode_since_eval >= args.eval_freq:    # 일정한 간격을 두고 evaluate를 실행합니다.
                 episode_since_eval %= args.eval_freq
                 evaluations.append(evaluate_policy(policy_high, policy))
 
@@ -215,14 +213,16 @@ if __name__ == "__main__":
             episode_num += 1
             episode_since_eval += 1
 
+        # 처음 코드를 실행시키면 무조건 done에 들어와서 파라메터를 초기화해주고 시작합니다. 그 다움부터는 에피소드가 끝날대마다 초기화됩니다.
         low_reward_sum = 0
         high_reward = 0
         low_goal_reach = False
         high_input = np.concatenate((obs['observation'], obs['desired_goal']), axis=0)
 
         # Select action randomly or according to policy
+        # 일정 에피소드 전까지는 랜덤하게 gaol이 초기화되고, 그 이후부터는 노이즈를 더한 high_policy의 출력이 goal이 됩니다.
         if episode_num < args.high_start_episode:
-            goal = np.random.uniform(-200., 200., int(env.observation_space.spaces['observation'].shape[0]))
+            goal = np.random.uniform(-max_state, max_state, int(env.observation_space.spaces['observation'].shape[0]))
         else:
             goal = policy_high.select_action(high_input)
             if args.expl_noise != 0:
@@ -231,41 +231,62 @@ if __name__ == "__main__":
                     -max_state, max_state)
 
         # Low_Policy start
+        # low_policy가 시작됩니다.
         while total_timesteps < args.max_timesteps:
 
-            if done:
+            # done 이나 low_goal_reach가 True 먼저 판단한 후 실행 코드로 넘어갑니다.
+            if done or low_goal_reach:
 
-                # Store data in replay buffer
-                replay_buffer_high.add((high_input, np.concatenate((new_obs['observation'], new_obs['desired_goal']), axis=0), goal, high_reward, done_bool))
 
-                # add episode to low replay buffer
-                replay_buffer_low.add(episode_replay_buffer.extract())
 
+                # 코드 실행 처음에 실행되는 것을 방지하기 위한 조치
                 if total_timesteps != 0:
 
+                    # Store data in replay buffer
+                    # 에피소드가 끝났으니 high_policy 메모리에 저장해줍니다.
+                    replay_buffer_high.add((high_input,
+                                            np.concatenate((new_obs['observation'], new_obs['desired_goal']), axis=0),
+                                            goal, high_reward, done_bool))
 
+                    # add episode to low replay buffer
+                    # episode_replay_buffer에 저장되어있는 메모리를 가저와 저장합니다. 동시에 episode_replay_buffer은 초기화됩니다.
+                    replay_buffer_low.add(episode_replay_buffer.extract())
+
+                    # 에피소드 결과와 경과를 출력해줍니다.
                     print("Total T : ", total_timesteps, "  Episode Num : ", episode_num, "  Episode T : ",
                           episode_timesteps, "  Reward : ", episode_reward, "  Low reward : ", low_reward_sum)
+
+                    # low_policy를 학습시켜줍니다.
                     policy.train(replay_buffer_low, episode_timesteps, args.batch_size, args.discount, args.tau,
                                   args.policy_noise, args.noise_clip, args.policy_freq)
 
+                    # low_goal_reach로 해당 반복문 진입에 성공하였기 때문에 다시 값을 False 로 바꿔줍니다.
+                    if low_goal_reach:
+                        low_goal_reach = False
+
+                    # high policy는 메모리가 늦게 쌓이므로 일정 에피소드 뒤부터 학습을 시켜줍니다.
                     if episode_num > args.high_train_episode :
-                        print('high_policy_training..')
                         #start_time = time.time()
+                        # replay_buffer_low 와 replay_buffer_high 를 받아 re_labeling을 해주고 relabel_replay_buffer에 저장해줍니다.
                         re_labeling(policy, replay_buffer_low, replay_buffer_high, relabel_replay_buffer,
                                     args.batch_size, state_dim)
                         #print(time.time() - start_time)
 
+                        # re_labeling 된 메모리를 이용하여 high_policy를 트래이닝 시켜줍니다.
                         policy_high.train(relabel_replay_buffer, int(episode_timesteps / 10), args.batch_size,
                                           args.discount, args.tau,
                                           args.policy_noise, args.noise_clip, args.policy_freq)
 
+
+                # high_policy 에게 끝났다는 사실을 알리기 위해 반복문에서 나와줍니다.
                 break
 
-            # Select action randomly or according to policy
 
+            # low 의 인풋으로 들어가도록 observation과 high_policy의 goal을 합쳐줍니다.
             low_input = np.concatenate((obs['observation'], goal), axis=0)
 
+            # Select action randomly or according to policy
+            # 일정 에피소드 전까지는 랜덤하게 action이 초기화되고, 그 이후부터는 노이즈를 더한 low_policy의 출력이 action이 됩니다.
             if episode_num < args.start_episode:
                 action = env.action_space.sample()
             else:
@@ -274,6 +295,7 @@ if __name__ == "__main__":
                     action = (action + np.random.normal(0, args.expl_noise, size=env.action_space.shape[0])).clip(
                         env.action_space.low, env.action_space.high)
 
+            # 파라메터 세팅값에 따라 렌더링을 해줍니다.
             if args.render:
                 env.render()
 
@@ -283,11 +305,12 @@ if __name__ == "__main__":
             episode_reward += reward
             high_reward += reward
 
+            # low reward 계산을 해주고 goal을 재설정합니다.
             low_reward = -abs(np.sum(obs['observation'] + goal - new_obs['observation']))
             goal = obs['observation'] + goal - new_obs['observation']
             low_reward_sum += low_reward
 
-
+            # episode_replay_buffer에 저장해줍니다.
             episode_replay_buffer.add((low_input, np.concatenate((new_obs['observation'], goal), axis=0), action, low_reward, done_bool))
 
             obs = new_obs
@@ -295,6 +318,7 @@ if __name__ == "__main__":
             episode_timesteps += 1
             total_timesteps += 1
 
+            # goal 이 달성되었다면 (우리가 설정한 범위 안에 들어오게 된다면)
             if low_reward > args.reward_threshold :
                 print('goal reached')
                 low_goal_reach = True
