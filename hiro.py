@@ -14,7 +14,9 @@ import time
 def evaluate_policy(policy_high, policy, eval_episodes=5):
     avg_reward = 0.
     print("---------------------------------------")
-    print("Evaluation over %d episodes: %f" % (eval_episodes, avg_reward))
+
+
+
     for _ in range(eval_episodes) :
 
         obs = env.reset()
@@ -26,10 +28,8 @@ def evaluate_policy(policy_high, policy, eval_episodes=5):
 
             while not done :
 
-
                 low_input = np.concatenate((obs['observation'], goal), axis=0)
                 action = policy.select_action(low_input)
-                #print('action : ', action)
                 new_obs, reward, done, _ = env.step(action)
 
                 avg_reward += reward
@@ -46,7 +46,7 @@ def evaluate_policy(policy_high, policy, eval_episodes=5):
 
     avg_reward /= eval_episodes
 
-
+    print("Evaluation over %d episodes: %f" % (eval_episodes, avg_reward))
     print("---------------------------------------")
     return avg_reward
 
@@ -54,7 +54,9 @@ def evaluate_policy(policy_high, policy, eval_episodes=5):
 def re_labeling(policy, replay_buffer_low, replay_buffer_high, relabel_replay_buffer, batch_size, state_dim) :
 
     # Sample replay buffer
+    # replay_buffer_high 의 보유 메모리 갯수 내에서 batch_size 만큼의 숫자를 랜덤 선정합니다.
     random_seed = np.random.randint(0, len(replay_buffer_high.storage), size=batch_size)
+
     X = replay_buffer_low.sample_episode(len(replay_buffer_low.storage), random_seed)
     X_high, Y_high, _, r, d = replay_buffer_high.sample(len(replay_buffer_high.storage), random_seed)
 
@@ -113,6 +115,7 @@ def re_labeling(policy, replay_buffer_low, replay_buffer_high, relabel_replay_bu
 
 if __name__ == "__main__":
 
+    # 하이퍼파라메터 세팅 부분입니다.
     parser = argparse.ArgumentParser()
     parser.add_argument("--policy_name", default="TD3")  # Policy name
     parser.add_argument("--env_name", default="FetchReach-v1")  # OpenAI gym environment name
@@ -129,13 +132,14 @@ if __name__ == "__main__":
     parser.add_argument("--noise_clip", default=0.5, type=float)  # Range to clip target policy noise
     parser.add_argument("--policy_freq", default=2, type=int)  # Frequency of delayed policy updates
     parser.add_argument("--reward_threshold", default=-5, type=float) # low_policy reward threshold
-    parser.add_argument("--render", default=True, type=bool)  # low_policy reward threshold
+    parser.add_argument("--render", default=False, type=bool)  # low_policy reward threshold
 
     # train start  hyperparameters
-    parser.add_argument("--high_train_episode", default=400, type=int)
-    parser.add_argument("--start_episode", default=200,
+    # 학습 시작 시점과 관련된 파라메터 값들입니다.
+    parser.add_argument("--high_train_episode", default=80, type=int)
+    parser.add_argument("--start_episode", default=30,
                         type=int)  # How many time steps purely random policy is run for
-    parser.add_argument("--high_start_episode", default=700,
+    parser.add_argument("--high_start_episode", default=50,
                         type=int)  # How many time steps purely random policy is run for
 
     args = parser.parse_args()
@@ -185,33 +189,42 @@ if __name__ == "__main__":
 
 
     # Evaluate untrained policy
+    # 학습되기 전 정책을 평가합니다.
     evaluations = [evaluate_policy(policy_high, policy)]
 
     total_timesteps = 0
     episode_since_eval = 0
     episode_num = 0
     done = True
+    low_goal_reach = False
 
     while total_timesteps < args.max_timesteps:
 
 
-        if done:
+        if done or low_goal_reach:
 
-            # Evaluate episode
-            if episode_since_eval >= args.eval_freq:    # 일정한 간격을 두고 evaluate를 실행합니다.
-                episode_since_eval %= args.eval_freq
-                evaluations.append(evaluate_policy(policy_high, policy))
+            # low_goal_reach로 해당 반복문 진입에 성공하였기 때문에 다시 값을 False 로 바꿔줍니다.
+            if low_goal_reach:
+                low_goal_reach = False
 
-                if args.save_models: policy.save(file_name, directory="./pytorch_models")
-                np.save("./results/%s" % (file_name), evaluations)
+            else :
+                # Evaluate episode
+                # 정책을 평가합니다.
+                if episode_since_eval >= args.eval_freq:    # 일정한 간격을 두고 evaluate를 실행합니다.
+                    episode_since_eval %= args.eval_freq
+                    evaluations.append(evaluate_policy(policy_high, policy))
 
-            # Reset environment
-            obs = env.reset()
-            done = False
-            episode_reward = 0
-            episode_timesteps = 0
-            episode_num += 1
-            episode_since_eval += 1
+                    if args.save_models: policy.save(file_name, directory="./pytorch_models")
+                    np.save("./results/%s" % (file_name), evaluations)
+
+                # Reset environment
+                # 환경을 초기화시켜줍니다.
+                obs = env.reset()
+                done = False
+                episode_reward = 0
+                episode_timesteps = 0
+                episode_num += 1
+                episode_since_eval += 1
 
         # 처음 코드를 실행시키면 무조건 done에 들어와서 파라메터를 초기화해주고 시작합니다. 그 다움부터는 에피소드가 끝날대마다 초기화됩니다.
         low_reward_sum = 0
@@ -227,8 +240,7 @@ if __name__ == "__main__":
             goal = policy_high.select_action(high_input)
             if args.expl_noise != 0:
                 goal = (goal + np.random.normal(0, args.expl_noise,
-                                                                  size=env.observation_space.spaces['observation'].shape[0])).clip(
-                    -max_state, max_state)
+                                                size=env.observation_space.spaces['observation'].shape[0])).clip(-max_state, max_state)
 
         # Low_Policy start
         # low_policy가 시작됩니다.
@@ -236,8 +248,6 @@ if __name__ == "__main__":
 
             # done 이나 low_goal_reach가 True 먼저 판단한 후 실행 코드로 넘어갑니다.
             if done or low_goal_reach:
-
-
 
                 # 코드 실행 처음에 실행되는 것을 방지하기 위한 조치
                 if total_timesteps != 0:
@@ -260,9 +270,6 @@ if __name__ == "__main__":
                     policy.train(replay_buffer_low, episode_timesteps, args.batch_size, args.discount, args.tau,
                                   args.policy_noise, args.noise_clip, args.policy_freq)
 
-                    # low_goal_reach로 해당 반복문 진입에 성공하였기 때문에 다시 값을 False 로 바꿔줍니다.
-                    if low_goal_reach:
-                        low_goal_reach = False
 
                     # high policy는 메모리가 늦게 쌓이므로 일정 에피소드 뒤부터 학습을 시켜줍니다.
                     if episode_num > args.high_train_episode :
@@ -278,7 +285,7 @@ if __name__ == "__main__":
                                           args.policy_noise, args.noise_clip, args.policy_freq)
 
 
-                # high_policy 에게 끝났다는 사실을 알리기 위해 반복문에서 나와줍니다.
+                # high_policy 반복문에게 끝났다는 사실을 알리기 위해 반복문에서 나와줍니다.
                 break
 
 
@@ -318,11 +325,11 @@ if __name__ == "__main__":
             episode_timesteps += 1
             total_timesteps += 1
 
-            # goal 이 달성되었다면 (우리가 설정한 범위 안에 들어오게 된다면)
+            # goal 이 달성되었다면 (우리가 설정한 범위 안에 들어오게 된다면) low_goal_reach를 True 로 바꿔줍니다. done 조건문에 잡힐것입니다.
             if low_reward > args.reward_threshold :
                 print('goal reached')
                 low_goal_reach = True
-                break
+
 
 
 
