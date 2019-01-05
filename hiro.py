@@ -136,10 +136,10 @@ if __name__ == "__main__":
 
     # train start  hyperparameters
     # 학습 시작 시점과 관련된 파라메터 값들입니다.
-    parser.add_argument("--high_train_episode", default=80, type=int)
-    parser.add_argument("--start_episode", default=30,
+    parser.add_argument("--high_train_episode", default=700, type=int)
+    parser.add_argument("--start_episode", default=300,
                         type=int)  # How many time steps purely random policy is run for
-    parser.add_argument("--high_start_episode", default=50,
+    parser.add_argument("--high_start_episode", default=600,
                         type=int)  # How many time steps purely random policy is run for
 
     args = parser.parse_args()
