@@ -23,14 +23,9 @@ class Actor(nn.Module):
 
 
 	def forward(self, x):
-		x = F.relu(self.l1(x))
-		x = F.relu(self.l2(x))
-
-		# self.max_action type casting(torch -> numpy)
-		self.max_action = np.asarray(self.max_action)
-		self.max_action = torch.from_numpy(self.max_action)
-		out = torch.tanh(self.l3(x))
-		x = self.max_action * torch.tanh(self.l3(x))
+		x = F.leaky_relu(self.l1(x))
+		x = F.leaky_relu(self.l2(x))
+		x = self.max_action * torch.tanh(self.l3(x)) 
 		return x
 
 
@@ -52,12 +47,12 @@ class Critic(nn.Module):
 	def forward(self, x, u):
 		xu = torch.cat([x, u], 1)
 
-		x1 = F.relu(self.l1(xu))
-		x1 = F.relu(self.l2(x1))
+		x1 = F.leaky_relu(self.l1(xu))
+		x1 = F.leaky_relu(self.l2(x1))
 		x1 = self.l3(x1)
 
-		x2 = F.relu(self.l4(xu))
-		x2 = F.relu(self.l5(x2))
+		x2 = F.leaky_relu(self.l4(xu))
+		x2 = F.leaky_relu(self.l5(x2))
 		x2 = self.l6(x2)
 		return x1, x2
 
@@ -65,23 +60,23 @@ class Critic(nn.Module):
 	def Q1(self, x, u):
 		xu = torch.cat([x, u], 1)
 
-		x1 = F.relu(self.l1(xu))
-		x1 = F.relu(self.l2(x1))
+		x1 = F.leaky_relu(self.l1(xu))
+		x1 = F.leaky_relu(self.l2(x1))
 		x1 = self.l3(x1)
 		return x1 
 
 
 class TD3(object):
-	def __init__(self, state_dim, action_dim, max_action):
+	def __init__(self, state_dim, action_dim, max_action, lr):
 		self.actor = Actor(state_dim, action_dim, max_action).to(device)
 		self.actor_target = Actor(state_dim, action_dim, max_action).to(device)
 		self.actor_target.load_state_dict(self.actor.state_dict())
-		self.actor_optimizer = torch.optim.Adam(self.actor.parameters())
+		self.actor_optimizer = torch.optim.Adam(self.actor.parameters(), lr=lr)
 
 		self.critic = Critic(state_dim, action_dim).to(device)
 		self.critic_target = Critic(state_dim, action_dim).to(device)
 		self.critic_target.load_state_dict(self.critic.state_dict())
-		self.critic_optimizer = torch.optim.Adam(self.critic.parameters())
+		self.critic_optimizer = torch.optim.Adam(self.critic.parameters(), lr=lr)
 
 		self.max_action = max_action
 
@@ -93,53 +88,20 @@ class TD3(object):
 
 	def train(self, replay_buffer, iterations, batch_size=100, discount=0.99, tau=0.005, policy_noise=0.2, noise_clip=0.5, policy_freq=2):
 
-
 		for it in range(iterations):
 
 			# Sample replay buffer 
 			x, y, u, r, d = replay_buffer.sample(batch_size)
 			state = torch.FloatTensor(x).to(device)
-			action = torch.FloatTensor(u).to(device)
 			next_state = torch.FloatTensor(y).to(device)
+			action = torch.FloatTensor(u).to(device)
 			done = torch.FloatTensor(1 - d).to(device)
 			reward = torch.FloatTensor(r).to(device)
 
-
-			# Select action according to policy and add clipped noise
+			# Select action according to policy and add clipped noise 
 			noise = torch.FloatTensor(u).data.normal_(0, policy_noise).to(device)
 			noise = noise.clamp(-noise_clip, noise_clip)
-			next_action = (self.actor_target(next_state) + noise).clamp(self.max_action, self.max_action)
-			"""
-			# customized for high policy observation max range
-			self.max_action = np.asarray(self.max_action)
-			output = self.actor_target(next_state)
-
-			# zero space will be cut off at line 132  -> next_action = next_action[:, 1:]
-
-			next_action = np.zeros((batch_size, 1))
-			for i in range(self.max_action.size) :
-
-				# slice output
-				#put = output[:, i]
-				put = output
-				#put = torch.unsqueeze(put, 1)
-
-				# add noise to the output and clamp
-				put = torch.squeeze((put + noise), 1).clamp(-self.max_action, self.max_action)
-
-				put = put.detach().numpy()
-
-				if put.ndim > 1 :
-					put = put[:, i]
-
-				# store to the temporary memory
-				tmp = put[:, np.newaxis]
-				next_action = np.concatenate((next_action, tmp), axis=1)
-			
-			next_action = next_action[:, 1:]
-			next_action = torch.from_numpy(next_action)
-			next_action = next_action.type(torch.float32)
-			"""
+			next_action = (self.actor_target(next_state) + noise).clamp(-self.max_action, self.max_action)
 
 			# Compute the target Q value
 			target_Q1, target_Q2 = self.critic_target(next_state, next_action)

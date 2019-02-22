@@ -3,8 +3,65 @@ import numpy as np
 # Code based on: 
 # https://github.com/openai/baselines/blob/master/baselines/deepq/replay_buffer.py
 
-# Expects tuples of (state, next_state, action, reward, done)
+# Expects tuples of (state, sub_goal, next_state, next_sub_goal, action, reward, done)
 class ReplayBuffer(object):
+	def __init__(self, c_step, max_size=2e5):
+		self.step_storage = []
+		self.episode_storage = []
+		self.tmp_storage = [] # c_step 길이만큼만 받아서 episode_storage에 뭉텅이로 전달해주고 지워짐
+		self.max_size = max_size
+		self.c_step = c_step
+		self.step_ptr = 0
+		self.episode_ptr = 0
+
+	def step_add(self, data):
+		self.tmp_storage.append(data)
+		if len(self.step_storage) == self.max_size:
+			self.step_storage[int(self.step_ptr)] = data
+			self.step_ptr = (self.step_ptr + 1) % self.max_size
+		else:
+			self.step_storage.append(data)
+
+
+
+
+	def episode_add(self):
+		if len(self.episode_storage) == (self.max_size/10) :
+			self.episode_storage[int(self.episode_ptr)] = self.tmp_storage
+			self.episode_ptr = (self.episode_ptr + 1) % (self.max_size/10)
+		else :
+			self.episode_storage.append(self.tmp_storage)
+		self.tmp_storage = []
+
+
+	def step_sample(self, batch_size):
+		ind = np.random.randint(0, len(self.step_storage), size=batch_size)
+		x, env_g, g, y, env_n_g, n_g, u, r, d, l_r = [], [], [], [], [], [], [], [], [], []
+
+		for i in ind: 
+			X, ENV_G, G, Y, ENV_N_G, N_G, U, R, D, L_R = self.step_storage[i]
+			x.append(np.array(X, copy=False))
+			env_g.append(np.array(ENV_G, copy=False))
+			g.append(np.array(G, copy=False))
+			y.append(np.array(Y, copy=False))
+			env_n_g.append(np.array(ENV_N_G, copy=False))
+			n_g.append(np.array(N_G, copy=False))
+			u.append(np.array(U, copy=False))
+			r.append(np.array(R, copy=False))
+			d.append(np.array(D, copy=False))
+			l_r.append(np.array(L_R, copy=False))
+
+		return np.array(x), np.array(env_g), np.array(g), np.array(y), np.array(env_n_g), np.array(n_g), np.array(u), np.array(r).reshape(-1, 1), np.array(d).reshape(-1, 1), np.array(l_r).reshape(-1, 1)
+
+	def episode_sample(self, batch_size):
+		ind = np.random.randint(0, len(self.episode_storage), size=batch_size)
+		t = []
+		for i in ind :
+			t.append(np.array(self.episode_storage[i], copy=False))
+
+		return np.array(t)
+
+class Normal_ReplayBuffer(object):
 	def __init__(self, max_size=1e6):
 		self.storage = []
 		self.max_size = max_size
@@ -17,24 +74,8 @@ class ReplayBuffer(object):
 		else:
 			self.storage.append(data)
 
-	def sample(self, batch_size, random_seed = np.array([-1])):
-		test = np.sum(random_seed)
-		if np.sum(random_seed) == -1 :
-			random_seed = np.random.randint(0, len(self.storage), size=batch_size)
-		x, y, u, r, d = [], [], [], [], []
-
-		for i in random_seed:
-			X, Y, U, R, D = self.storage[i]
-			x.append(np.array(X, copy=False))
-			y.append(np.array(Y, copy=False))
-			u.append(np.array(U, copy=False))
-			r.append(np.array(R, copy=False))
-			d.append(np.array(D, copy=False))
-
-		return np.array(x), np.array(y), np.array(u), np.array(r).reshape(-1, 1), np.array(d).reshape(-1, 1)
-
-	def extract(self):
-		ind = np.arange(0, len(self.storage))
+	def sample(self, batch_size):
+		ind = np.random.randint(0, len(self.storage), size=batch_size)
 		x, y, u, r, d = [], [], [], [], []
 
 		for i in ind:
@@ -45,67 +86,5 @@ class ReplayBuffer(object):
 			r.append(np.array(R, copy=False))
 			d.append(np.array(D, copy=False))
 
-		self.storage = []
-		self.ptr = 0
 		return np.array(x), np.array(y), np.array(u), np.array(r).reshape(-1, 1), np.array(d).reshape(-1, 1)
 
-	def reset(self):
-		self.storage = []
-		self.ptr = []
-
-
-class Episode_ReplayBuffer(object) :
-	def __init__(self, max_size = 1e4):
-		self.storage = []
-		self.max_size = max_size
-		self.ptr = 0
-
-	def add(self, data):
-		if len(self.storage) == self.max_size:
-			self.storage[int(self.ptr)] = data
-			self.ptr = (self.ptr + 1) % self.max_size
-		else:
-			self.storage.append(data)
-
-	def sample_episode(self, batch_size, random_seed = np.array([-1])):
-		if random_seed.all() == -1 :
-			random_seed = np.random.randint(0, len(self.storage), size=batch_size)
-		t = []
-
-		for i in range(random_seed.size):
-			T = self.storage[random_seed[i]]
-			t.append(T)
-		return t
-
-	def sample(self, batch_size):
-
-		t = []
-		x, y, u, r, d = [], [], [], [], []
-
-		for i in range(len(self.storage)):
-			T = self.storage[i]
-
-			X, Y, U, R, D = T
-			x.append(np.array(X, copy=False))
-			y.append(np.array(Y, copy=False))
-			u.append(np.array(U, copy=False))
-			r.append(np.array(R, copy=False))
-			d.append(np.array(D, copy=False))
-
-		# length = x[0][0].shape[0]		# size of observation + goal
-
-		s, s2, a, re, do = [], [], [], [], []
-		for k in range(batch_size) :
-
-			episode_random_num = np.random.randint(0, len(self.storage), 1)[0]
-			test = x[episode_random_num].shape[0]
-			step_random_num = np.random.randint(0, x[episode_random_num].shape[0], 1)
-
-			s.append(x[episode_random_num][step_random_num][0])
-			s2.append(y[episode_random_num][step_random_num][0])
-			a.append(u[episode_random_num][step_random_num][0])
-			re.append(r[episode_random_num][step_random_num][0])
-			do.append(d[episode_random_num][step_random_num][0])
-
-
-		return np.array(s), np.array(s2), np.array(a), np.array(re).reshape(-1, 1), np.array(do).reshape(-1, 1)
