@@ -1,25 +1,30 @@
-# Addressing Function Approximation Error in Actor-Critic Methods
+# data-efficient hrl(pytorch)
+논문 [data-efficient-hrl](https://arxiv.org/abs/1805.08296) (이하 hiro)을 파이토치로 구현하였습니다.
+model-free 알고리즘인 [TD3](https://arxiv.org/abs/1802.09477)을 기반으로 작동되는 코드인 점을 감안하여
+논문에 등재된 [공식 TD3 코드](https://arxiv.org/abs/1802.09477)를 기반으로 구현되었습니다([코드](https://github.com/sfujim/TD3)).
 
-PyTorch implementation of Twin Delayed Deep Deterministic Policy Gradients (TD3). If you use our code or data please cite the [paper](https://arxiv.org/abs/1802.09477).
+### 파일설명
+```hiro.py``` : hiro의 구조를 모두 포함하고 있는 메인 파일입니다.  
 
-Method is tested on [MuJoCo](http://www.mujoco.org/) continuous control tasks in [OpenAI gym](https://github.com/openai/gym). 
-Networks are trained using [PyTorch 0.4](https://github.com/pytorch/pytorch) and Python 2.7. 
+ ```TD3.py``` : agent를 생성하는 파일입니다. [공식 TD3 코드](https://arxiv.org/abs/1802.09477)의 TD3.py 와 동일합니다.
+ 
+ ```utils.py``` : experience memory를 생성해줍니다.  
+ [공식 TD3 코드](https://arxiv.org/abs/1802.09477)에 있는 메모리 클래스와 hiro에 맞게 수정되어진 메모리가 있는데, 
+ 기본적으로 hiro에 맞게 수정되어진 메모리에 저장을 하고, 추후 train을 할 시에 함수를 통하여 TD3 학습에 맞게끔 데이터를 수정하여 공식 메모리 클래스에 
+ 임시로 저장을 해 준다음 TD3 학습을 시키게 됩니다.
 
-### Usage
-The paper results can be reproduced exactly by running:
-```
-./experiments.sh
-```
-Experiments on single environments can be run by calling:
-```
-python2 main.py --env HalfCheetah-v1
-```
+### 필요 모듈 설치 명령어
+#### python2.7
+```$ pip install torch torch-vision gym```
+```$ pip install -U 'mujoco-py<1.50.2,>=1.50.1'```
 
-Hyper-parameters can be modified with different arguments to main.py. We include an implementation of DDPG (DDPG.py) for easy comparison of hyper-parameters with TD3, this is not the implementation of "Our DDPG" as used in the paper (see OurDDPG.py). 
+#### python3
+```$ pip3 install torch torch-vision gym```
+```$ pip3 install -U 'mujoco-py<1.50.2,>=1.50.1'```
 
-Algorithms which TD3 compares against (PPO, TRPO, ACKTR, DDPG) can be found at [OpenAI baselines repository](https://github.com/openai/baselines). 
+### 실행방법
+실행방법은 다음과 같습니다 :  
+```$ python hiro.py --env Fetchreach-v1 --render=True ```  
 
-### Results
-Learning curves found in the paper are found under /learning_curves. Each learning curve are formatted as NumPy arrays of 201 evaluations (201,), where each evaluation corresponds to the average total reward from running the policy for 10 episodes with no exploration. The first evaluation is the randomly initialized policy network (unused in the paper). Evaluations are peformed every 5000 time steps, over a total of 1 million time steps. 
-
-Numerical results can be found in the paper, or from the learning curves. Video of the learned agent can be found [here](https://youtu.be/x33Vw-6vzso). 
+Flag 기본값이 hiro.py에 모두 정의되어있는 만큼 hiro.py를 Flag 없이 실행시켜도 돌아갑니다.
+hiro.py 를 참고하시고 변경을 원하시는 상수들은 임의로 바꾸실 수 있습니다.
